@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="ru">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Визуализация ДТП — готовая версия</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- MarkerCluster -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+  <!-- leaflet.heat -->
+  <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+
+  <!-- PapaParse для CSV -->
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- noUiSlider для выбора дат (подключено, но пока не используется) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/14.7.0/nouislider.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/14.7.0/nouislider.min.js"></script>
+
+  <style>
+    :root {
+      --sidebar-w: 340px;
+      --accent: #0b74de
+    }
+
+    html,
+    body,
+    #map {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      font-family: Inter, system-ui, Arial, sans-serif
+    }
+
+    .app {
+      display: flex;
+      height: 100vh;
+    }
+
+    .sidebar {
+      width: var(--sidebar-w);
+      min-width: 260px;
+      background: #fff;
+      border-right: 1px solid #e6e6e6;
+      padding: 16px;
+      box-sizing: border-box;
+      overflow: auto
+    }
+
+    .map-wrap {
+      flex: 1;
+      position: relative
+    }
+
+    #map {
+      width: 100%;
+      height: 100%
+    }
+
+    h2 {
+      margin: 8px 0 12px 0;
+      font-size: 18px
+    }
+
+    label {
+      display: block;
+      margin: 8px 0 6px 0;
+      font-size: 13px
+    }
+
+    select,
+    input[type=date],
+    button,
+    input[type=file] {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px;
+      margin-bottom: 8px
+    }
+
+    .stats {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px
+    }
+
+    .stat {
+      flex: 1;
+      background: #f7f7f8;
+      padding: 8px;
+      border-radius: 6px;
+      text-align: center
+    }
+
+    .table {
+      margin-top: 8px;
+      max-height: 200px;
+      overflow: auto;
+      border-top: 1px solid #eee
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px
+    }
+
+    th,
+    td {
+      padding: 6px 8px;
+      border-bottom: 1px solid #f0f0f0;
+      text-align: left
+    }
+
+    .controls-row {
+      display: flex;
+      gap: 8px
+    }
+
+    .legend {
+      position: absolute;
+      right: 12px;
+      bottom: 12px;
+      background: #fff;
+      padding: 8px;
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, .12);
+      min-width: 160px;
+      z-index: 1000
+    }
+
+    .btn {
+      padding: 8px;
+      cursor: pointer;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 6px
+    }
+
+    .btn-ghost {
+      padding: 8px;
+      cursor: pointer;
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid #e6e6e6;
+      border-radius: 6px
+    }
+
+    .small {
+      font-size: 12px
+    }
+
+    .top-actions {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px
+    }
+
+    .u-row {
+      display: flex;
+      gap: 8px
+    }
+
+    .chart-wrap {
+      height: 140px;
+      margin-top: 8px
+    }
+
+    footer {
+      font-size: 12px;
+      color: #666;
+      padding: 8px
+    }
+
+    @media(max-width:900px) {
+      .sidebar {
+        display: none
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <h2>ДТП — демонстрационный проект</h2>
+
+      <div class="top-actions">
+        <input id="file-input" type="file" accept=".csv,application/geo+json,application/json,.geojson" />
+        <button id="btn-sample" class="btn-ghost" title="Загрузить пример данных">Загрузить пример</button>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="small">Записей</div>
+          <div id="stat-count">0</div>
+        </div>
+        <div class="stat">
+          <div class="small">Ранен.</div>
+          <div id="stat-inj">0</div>
+        </div>
+        <div class="stat">
+          <div class="small">Погибл.</div>
+          <div id="stat-kill">0</div>
+        </div>
+      </div>
+
+      <label>Фильтры</label>
+      <select id="severity">
+        <option value="all">Тяжесть: все</option>
+        <option value="minor">minor</option>
+        <option value="injury">injury</option>
+        <option value="fatal">fatal</option>
+      </select>
+
+      <select id="type">
+        <option value="all">Тип: все</option>
+        <option value="collision">collision</option>
+        <option value="runover">runover</option>
+        <option value="rollover">rollover</option>
+      </select>
+
+      <label>По часам</label>
+      <div class="chart-wrap"><canvas id="hoursChart"></canvas></div>
+
+      <label>Список (клик — центрировать)</label>
+      <div class="table">
+        <table id="acc-table">
+          <thead>
+            <tr>
+              <th>Дата</th>
+              <th>Улица</th>
+              <th>Тяжесть</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div style="margin-top:10px" class="controls-row">
+        <button id="btn-heat" class="btn">Показать Heatmap</button>
+        <button id="btn-cluster" class="btn">Показать Кластеры</button>
+      </div>
+
+      <div style="margin-top:8px" class="controls-row">
+        <button id="btn-export" class="btn-ghost">Экспорт CSV</button>
+        <button id="btn-reset" class="btn-ghost">Сброс</button>
+      </div>
+
+      <footer>
+        Инструкция: загрузите CSV (поля: id,date,lat,lon,street,severity,type,injured,killed) или GeoJSON. После
+        загрузки используйте фильтры и экспорт.
+      </footer>
+    </aside>
+
+    <div class="map-wrap">
+      <div id="map"></div>
+      <div class="legend" id="legend">
+        <div class="small"><strong>Легенда</strong></div>
+        <div class="small">● Кластер — сгруппированные точки</div>
+        <div class="small">● Heatmap — плотность аварий</div>
+        <div style="height:8px"></div>
+        <div class="small"><strong>Как опубликовать</strong></div>
+        <div class="small">1) Создать репозиторий на GitHub. 2) Поместить этот файл в корень. 3) Включить GitHub Pages
+          (branch: main). 4) Ссылка будет доступна через github.io</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- Инициализация карты ---
+    const map = L.map('map').setView([42.87, 74.59], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+
+    // Layers
+    const markerCluster = L.markerClusterGroup();
+    let heatLayer = null;
+    let markersLayer = L.layerGroup();
+    let allFeatures = [];
+
+    // Charts
+    let hoursChart = null;
+    function initCharts() {
+      const ctx = document.getElementById('hoursChart').getContext('2d');
+      hoursChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: Array.from({ length: 24 }, (v, i) => i),
+          datasets: [{ label: 'ДТП по часам', data: Array(24).fill(0) }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: { y: { beginAtZero: true } }
+        }
+      });
+    }
+    initCharts();
+
+    // Helpers
+    function resetView() {
+      if (map.hasLayer(markerCluster)) map.removeLayer(markerCluster);
+      if (map.hasLayer(markersLayer)) map.removeLayer(markersLayer);
+      if (heatLayer) { heatLayer.remove(); heatLayer = null; }
+    }
+
+    function addFeaturesToMap(features) {
+      resetView();
+      markerCluster.clearLayers(); markersLayer.clearLayers();
+      const heatPoints = [];
+      features.forEach(f => {
+        // support GeoJSON Feature or plain object
+        let lat, lon;
+        if (f.geometry && Array.isArray(f.geometry.coordinates)) {
+          lon = f.geometry.coordinates[0];
+          lat = f.geometry.coordinates[1];
+        } else {
+          lat = parseFloat(f.lat);
+          lon = parseFloat(f.lon);
+        }
+        if (isNaN(lat) || isNaN(lon)) return;
+        const p = f.properties || f;
+        const coords = [lat, lon];
+        const m = L.marker(coords);
+        m.bindPopup(`<b>${(p.date || p.datetime || '').toString().replace('T', ' ')}</b><br>${p.street || ''}<br>Тяжесть: ${p.severity || ''}<br>Ранено: ${p.injured || 0} / Погибл: ${p.killed || 0}`);
+        m.on('click', () => { map.setView(coords, 15); });
+        markerCluster.addLayer(m);
+        markersLayer.addLayer(m);
+        heatPoints.push([lat, lon, 0.6]);
+      });
+      map.addLayer(markerCluster);
+      if (features.length < 200) map.addLayer(markersLayer);
+      heatLayer = L.heatLayer(heatPoints, { radius: 25 });
+    }
+
+    function updateTable(features) {
+      const tbody = document.querySelector('#acc-table tbody'); tbody.innerHTML = '';
+      features.slice(0, 200).forEach(f => {
+        const p = f.properties || f;
+        const date = (p.date || p.datetime || '').toString();
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${date.replace('T', ' ')}</td><td>${p.street || ''}</td><td>${p.severity || ''}</td>`;
+        tr.addEventListener('click', () => {
+          let lat, lon;
+          if (f.geometry && Array.isArray(f.geometry.coordinates)) {
+            lon = f.geometry.coordinates[0];
+            lat = f.geometry.coordinates[1];
+          } else {
+            lat = parseFloat(f.lat); lon = parseFloat(f.lon);
+          }
+          if (!isNaN(lat) && !isNaN(lon)) map.setView([lat, lon], 15);
+        });
+        tbody.appendChild(tr);
+      });
+    }
+
+    function updateStats(features) {
+      document.getElementById('stat-count').innerText = features.length;
+      const inj = features.reduce((s, f) => {
+        const p = f.properties || f; return s + (parseInt(p.injured || p.injuries || 0) || 0);
+      }, 0);
+      const kill = features.reduce((s, f) => {
+        const p = f.properties || f; return s + (parseInt(p.killed || 0) || 0);
+      }, 0);
+      document.getElementById('stat-inj').innerText = inj;
+      document.getElementById('stat-kill').innerText = kill;
+    }
+
+    function updateCharts(features) {
+      const hours = Array(24).fill(0);
+      features.forEach(f => {
+        const p = f.properties || f;
+        const dtStr = p.date || p.datetime || p.time || '';
+        const dt = dtStr ? new Date(dtStr) : null;
+        if (dt && !isNaN(dt)) hours[dt.getHours()]++;
+      });
+      if (hoursChart) { hoursChart.data.datasets[0].data = hours; hoursChart.update(); }
+    }
+
+    function applyFilters() {
+      const severity = document.getElementById('severity').value;
+      const type = document.getElementById('type').value;
+      let filtered = allFeatures.filter(f => {
+        const p = f.properties || f;
+        if (severity !== 'all' && String((p.severity || '')).toLowerCase() !== String(severity).toLowerCase()) return false;
+        if (type !== 'all' && String((p.type || '')).toLowerCase() !== String(type).toLowerCase()) return false;
+        return true;
+      });
+      addFeaturesToMap(filtered);
+      updateTable(filtered);
+      updateStats(filtered);
+      updateCharts(filtered);
+      window._lastFiltered = filtered;
+    }
+
+    // File loading
+    document.getElementById('file-input').addEventListener('change', (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      const name = file.name.toLowerCase();
+      if (name.endsWith('.csv')) {
+        Papa.parse(file, {
+          header: true,
+          dynamicTyping: false,
+          skipEmptyLines: true,
+          complete: (res) => {
+            console.log('CSV parsed rows sample:', res.data.slice(0,5));
+            const normalizeNum = v => {
+              if (v === undefined || v === null) return NaN;
+              return parseFloat(String(v).trim().replace(',', '.'));
+            };
+            const rows = res.data.map(r => {
+              const p = r || {};
+              const lat = normalizeNum(p.lat ?? p.latitude ?? p.LAT);
+              const lon = normalizeNum(p.lon ?? p.lng ?? p.longitude ?? p.LON);
+              return {
+                id: p.id ?? p.ID ?? '',
+                date: p.date ?? p.datetime ?? p.Date ?? '',
+                lat, lon,
+                street: p.street ?? p.address ?? '',
+                severity: String(p.severity ?? '').toLowerCase(),
+                type: String(p.type ?? '').toLowerCase(),
+                injured: parseInt(p.injured ?? p.injuries ?? 0) || 0,
+                killed: parseInt(p.killed ?? 0) || 0
+              };
+            }).filter(r => !isNaN(r.lat) && !isNaN(r.lon));
+
+            // Если не нашлось точек — попробовать парсить с разделителем ';'
+            if (rows.length === 0 && res.data.length > 0) {
+              console.log('No valid coords parsed — retrying with delimiter ";"');
+              Papa.parse(file, {
+                header: true, skipEmptyLines: true, delimiter: ';',
+                complete: (res2) => {
+                  const rows2 = res2.data.map(r => {
+                    const p = r || {};
+                    const lat = normalizeNum(p.lat ?? p.latitude ?? p.LAT);
+                    const lon = normalizeNum(p.lon ?? p.lng ?? p.longitude ?? p.LON);
+                    return {
+                      id: p.id ?? p.ID ?? '',
+                      date: p.date ?? p.datetime ?? p.Date ?? '',
+                      lat, lon,
+                      street: p.street ?? p.address ?? '',
+                      severity: String(p.severity ?? '').toLowerCase(),
+                      type: String(p.type ?? '').toLowerCase(),
+                      injured: parseInt(p.injured ?? p.injuries ?? 0) || 0,
+                      killed: parseInt(p.killed ?? 0) || 0
+                    };
+                  }).filter(r => !isNaN(r.lat) && !isNaN(r.lon));
+                  allFeatures = rows2;
+                  addFeaturesToMap(allFeatures);
+                  updateTable(allFeatures);
+                  updateStats(allFeatures);
+                  updateCharts(allFeatures);
+                  window._lastFiltered = allFeatures;
+                }
+              });
+              return;
+            }
+
+            allFeatures = rows;
+            addFeaturesToMap(allFeatures);
+            updateTable(allFeatures);
+            updateStats(allFeatures);
+            updateCharts(allFeatures);
+            window._lastFiltered = allFeatures;
+          }
+        });
+      } else {
+        const reader = new FileReader(); reader.onload = () => {
+          try {
+            const geo = JSON.parse(reader.result);
+            if (geo.type === 'FeatureCollection' && Array.isArray(geo.features)) {
+              allFeatures = geo.features;
+              addFeaturesToMap(allFeatures);
+              updateTable(allFeatures);
+              updateStats(allFeatures);
+              updateCharts(allFeatures);
+              window._lastFiltered = allFeatures;
+            } else {
+              alert('Ожидается GeoJSON FeatureCollection');
+            }
+          } catch (err) { alert('Ошибка парсинга файла: ' + err.message) }
+        }; reader.readAsText(file);
+      }
+    });
+
+    // Sample data (small GeoJSON) - same structure as demo
+    document.getElementById('btn-sample').addEventListener('click', () => {
+      // try fetching external sample; if blocked, use built-in fallback
+      fetch('https://raw.githubusercontent.com/anshumanv/accident-sample/main/sample.geojson').then(r => r.json()).then(g => {
+        if (g && g.features) {
+          allFeatures = g.features;
+          addFeaturesToMap(allFeatures); updateTable(allFeatures); updateStats(allFeatures); updateCharts(allFeatures);
+          window._lastFiltered = allFeatures;
+        } else {
+          throw new Error('No features');
+        }
+      }).catch(() => {
+        allFeatures = [
+          { properties: { id: 1, date: '2025-10-22T08:30:00', street: 'ул. Чуй', severity: 'injury', type: 'collision', injured: 1, killed: 0 }, geometry: { type: 'Point', coordinates: [74.5859, 42.8746] } },
+          { properties: { id: 2, date: '2025-10-22T09:45:00', street: 'пер. Советский', severity: 'minor', type: 'runover', injured: 0, killed: 0 }, geometry: { type: 'Point', coordinates: [74.6000, 42.8730] } },
+          { properties: { id: 3, date: '2025-10-23T19:10:00', street: 'пр. Манаса', severity: 'fatal', type: 'collision', injured: 2, killed: 1 }, geometry: { type: 'Point', coordinates: [74.5974, 42.8682] } },
+        ];
+        addFeaturesToMap(allFeatures); updateTable(allFeatures); updateStats(allFeatures); updateCharts(allFeatures);
+        window._lastFiltered = allFeatures;
+      });
+    });
+
+    // Buttons
+    document.getElementById('btn-heat').addEventListener('click', () => {
+      if (heatLayer && map.hasLayer(heatLayer)) { map.removeLayer(heatLayer); }
+      else {
+        const source = window._lastFiltered && window._lastFiltered.length ? window._lastFiltered : allFeatures;
+        if (!source || !source.length) return alert('Нет данных для heatmap');
+        heatLayer = L.heatLayer(source.map(f => {
+          if (f.geometry && Array.isArray(f.geometry.coordinates)) return [f.geometry.coordinates[1], f.geometry.coordinates[0], 0.6];
+          return [parseFloat(f.lat), parseFloat(f.lon), 0.6];
+        }), { radius: 25 });
+        heatLayer.addTo(map);
+      }
+    });
+
+    document.getElementById('btn-cluster').addEventListener('click', () => {
+      if (map.hasLayer(markerCluster)) { map.removeLayer(markerCluster); }
+      else { map.addLayer(markerCluster); }
+    });
+
+    document.getElementById('btn-export').addEventListener('click', () => {
+      const features = (window._lastFiltered && window._lastFiltered.length) ? window._lastFiltered : allFeatures || [];
+      if (!features.length) return alert('Нет данных для экспорта');
+      const rows = [['id', 'date', 'lat', 'lon', 'street', 'severity', 'type', 'injured', 'killed']];
+      features.forEach(f => {
+        const p = f.properties || f;
+        const lon = f.geometry ? f.geometry.coordinates[0] : f.lon;
+        const lat = f.geometry ? f.geometry.coordinates[1] : f.lat;
+        rows.push([p.id || '', p.date || p.datetime || '', lat, lon, p.street || '', p.severity || '', p.type || '', p.injured || 0, p.killed || 0]);
+      });
+      const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'accidents_export.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    });
+
+    document.getElementById('btn-reset').addEventListener('click', () => {
+      allFeatures = []; resetView();
+      document.querySelector('#acc-table tbody').innerHTML = '';
+      document.getElementById('stat-count').innerText = '0';
+      document.getElementById('stat-inj').innerText = '0';
+      document.getElementById('stat-kill').innerText = '0';
+      if (hoursChart) { hoursChart.data.datasets[0].data = Array(24).fill(0); hoursChart.update(); }
+      window._lastFiltered = [];
+    });
+
+    // Filter change
+    document.getElementById('severity').addEventListener('change', applyFilters);
+    document.getElementById('type').addEventListener('change', applyFilters);
+
+    // Fit to data on load if any
+    window.addEventListener('load', () => { /* nothing by default */ });
+
+  </script>
+</body>
+
+</html>
